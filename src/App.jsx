@@ -112,10 +112,7 @@ const DEFAULT_MEETINGS = [
 
 export default function App() {
   // --- SESSION & ONBOARDING STATE ---
-  const [userSession, setUserSession] = useState(() => {
-    const saved = window.localStorage.getItem('meetmind_user_session');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [userSession, setUserSession] = useState(null);
   const [authMode, setAuthMode] = useState('register'); // 'login' | 'register'
   const [onboardingStep, setOnboardingStep] = useState(1); // 1: Auth, 2: UseCase selection, 3: Details form
   const [authEmail, setAuthEmail] = useState('');
@@ -133,22 +130,13 @@ export default function App() {
   const [personalGoal, setPersonalGoal] = useState('General Productivity');
 
   // --- STATE MANAGEMENT ---
-  const [meetings, setMeetings] = useState(() => {
-    const saved = window.localStorage.getItem('meetmind_meetings');
-    return saved ? JSON.parse(saved) : DEFAULT_MEETINGS;
-  });
-
-  const [currentMeeting, setCurrentMeeting] = useState(() => {
-    return meetings.length > 0 ? meetings[0] : null;
-  });
-
-  const [tasks, setTasks] = useState(() => {
-    return meetings.flatMap(m => m.tasks || []);
-  });
+  const [meetings, setMeetings] = useState([]);
+  const [currentMeeting, setCurrentMeeting] = useState(null);
+  const [tasks, setTasks] = useState([]);
 
   const [activeTab, setActiveTab] = useState('analyze');
   const [isLoading, setIsLoading] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(currentMeeting);
+  const [analysisResult, setAnalysisResult] = useState(null);
 
   // Input states
   const [inputMethod, setInputMethod] = useState('text'); // 'text', 'audio', 'link'
@@ -181,7 +169,69 @@ export default function App() {
   // Toasts
   const [toasts, setToasts] = useState([]);
 
-  // --- SYNC ACTIONS ---
+  // --- API FETCH CLIENT UTILITIES ---
+  const apiFetch = async (url, options = {}) => {
+    const token = window.localStorage.getItem('meetmind_token');
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const response = await fetch(url, { ...options, headers });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.message || `Request failed with status ${response.status}`);
+    }
+    return response.json();
+  };
+
+  const fetchMeetings = async () => {
+    try {
+      const list = await apiFetch('/api/meetings');
+      setMeetings(list);
+      if (list.length > 0) {
+        setCurrentMeeting(list[0]);
+      } else {
+        setCurrentMeeting(null);
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to fetch meetings', 'error');
+    }
+  };
+
+  // --- SYNC ACTIONS & ON-LOAD INITIALIZATION ---
+  useEffect(() => {
+    const token = window.localStorage.getItem('meetmind_token');
+    if (token) {
+      apiFetch('/api/auth/me')
+        .then(session => {
+          setUserSession(session);
+          if (session.useCase && session.details) {
+            setActiveTab('analyze');
+          } else {
+            setOnboardingStep(2);
+          }
+        })
+        .catch(err => {
+          console.error('Session restore failed:', err);
+          window.localStorage.removeItem('meetmind_token');
+          setUserSession(null);
+          setOnboardingStep(1);
+        });
+    } else {
+      setUserSession(null);
+      setOnboardingStep(1);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (userSession && userSession.useCase && userSession.details) {
+      fetchMeetings();
+    }
+  }, [userSession]);
+
   useEffect(() => {
     // Sync active meeting result when current meeting changes
     setAnalysisResult(currentMeeting);
@@ -192,11 +242,6 @@ export default function App() {
     const all = meetings.flatMap(m => m.tasks || []);
     setTasks(all);
   }, [meetings]);
-
-  const saveMeetingsToLocalStorage = (updatedMeetings) => {
-    setMeetings(updatedMeetings);
-    window.localStorage.setItem('meetmind_meetings', JSON.stringify(updatedMeetings));
-  };
 
   // --- TOAST NOTIFICATIONS ---
   const showToast = (message, type = 'info') => {
@@ -213,14 +258,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   };
 
-  const saveRegisteredAccount = (email, accountData) => {
-    const accounts = getRegisteredAccounts();
-    accounts[email.toLowerCase()] = accountData;
-    window.localStorage.setItem('meetmind_accounts', JSON.stringify(accounts));
-  };
-
   // --- AUTH SUBMISSION ---
-  const handleAuthSubmit = (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
     if (!authEmail.trim() || !authPassword.trim()) {
       showToast('Please fill in all credentials.', 'error');
@@ -237,61 +276,46 @@ export default function App() {
       return;
     }
 
-    const accounts = getRegisteredAccounts();
-    const emailKey = authEmail.toLowerCase();
+    try {
+      if (authMode === 'register') {
+        if (authPassword !== authConfirmPassword) {
+          showToast('Passwords do not match.', 'error');
+          return;
+        }
 
-    if (authMode === 'register') {
-      if (authPassword !== authConfirmPassword) {
-        showToast('Passwords do not match.', 'error');
-        return;
-      }
-      if (accounts[emailKey]) {
-        showToast('Account already exists. Please log in.', 'error');
-        return;
-      }
-
-      // Create new account structure
-      const newAccount = {
-        email: authEmail,
-        password: authPassword,
-        useCase: null,
-        details: null
-      };
-      saveRegisteredAccount(authEmail, newAccount);
-      showToast('Registration successful! Please configure your use case.', 'success');
-      setOnboardingStep(2);
-    } else {
-      // Login
-      const user = accounts[emailKey];
-      if (!user) {
-        showToast('No account found under this email. Please register first.', 'error');
-        return;
-      }
-      if (user.password !== authPassword) {
-        showToast('Incorrect password.', 'error');
-        return;
-      }
-
-      // If already has useCase setup, log them in
-      if (user.useCase && user.details) {
-        const session = {
-          email: user.email,
-          useCase: user.useCase,
-          details: user.details
-        };
-        window.localStorage.setItem('meetmind_user_session', JSON.stringify(session));
-        setUserSession(session);
-        showToast(`Welcome back, ${user.details.name || user.details.companyName || user.email}!`, 'success');
-      } else {
-        // Needs onboarding setup completion
-        showToast('Please complete your profile setup.', 'info');
+        const data = await apiFetch('/api/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ email: authEmail, password: authPassword })
+        });
+        
+        window.localStorage.setItem('meetmind_token', data.token);
+        setUserSession(data.user);
+        showToast('Registration successful! Please configure your use case.', 'success');
         setOnboardingStep(2);
+      } else {
+        // Login
+        const data = await apiFetch('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email: authEmail, password: authPassword })
+        });
+        
+        window.localStorage.setItem('meetmind_token', data.token);
+        setUserSession(data.user);
+        
+        if (data.user.useCase && data.user.details) {
+          showToast(`Welcome back, ${data.user.details.name || data.user.details.companyName || data.user.email}!`, 'success');
+        } else {
+          showToast('Please complete your profile setup.', 'info');
+          setOnboardingStep(2);
+        }
       }
+    } catch (err) {
+      showToast(err.message || 'Authentication failed', 'error');
     }
   };
 
   // --- COMPLETE SETUP ---
-  const handleCompleteSetup = (e) => {
+  const handleCompleteSetup = async (e) => {
     e.preventDefault();
 
     if (!useCase) {
@@ -306,13 +330,11 @@ export default function App() {
         showToast('Please enter your company or organization name.', 'error');
         return;
       }
-      // Filter out completely empty members
       const activeMembers = teamMembers.filter(m => m.name.trim() || m.email.trim());
       if (activeMembers.length === 0) {
         showToast('Please add at least one team member.', 'error');
         return;
       }
-      // Validate emails
       for (const member of activeMembers) {
         if (!member.name.trim()) {
           showToast('All active team member rows must have a name.', 'error');
@@ -344,41 +366,21 @@ export default function App() {
       };
     }
 
-    // Assemble and store user session
-    const session = {
-      email: authEmail || userSession?.email || 'user@example.com',
-      useCase,
-      details
-    };
-
-    // Save in registered accounts database too
-    const currentEmail = authEmail || userSession?.email;
-    if (currentEmail) {
-      const accounts = getRegisteredAccounts();
-      const user = accounts[currentEmail.toLowerCase()];
-      if (user) {
-        user.useCase = useCase;
-        user.details = details;
-        saveRegisteredAccount(currentEmail, user);
-      } else {
-        // Fallback for session recovery if accounts got wiped
-        saveRegisteredAccount(currentEmail, {
-          email: currentEmail,
-          password: 'password123',
-          useCase,
-          details
-        });
-      }
+    try {
+      const data = await apiFetch('/api/auth/onboard', {
+        method: 'POST',
+        body: JSON.stringify({ useCase, details })
+      });
+      setUserSession(data);
+      showToast('Setup complete! Welcome to MeetMind Dashboard.', 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to save setup details', 'error');
     }
-
-    window.localStorage.setItem('meetmind_user_session', JSON.stringify(session));
-    setUserSession(session);
-    showToast('Setup complete! Welcome to MeetMind Dashboard.', 'success');
   };
 
   // --- SIGN OUT ACTION ---
   const handleSignOut = () => {
-    window.localStorage.removeItem('meetmind_user_session');
+    window.localStorage.removeItem('meetmind_token');
     setUserSession(null);
     setOnboardingStep(1);
     setAuthEmail('');
@@ -389,6 +391,8 @@ export default function App() {
     setTeamMembers([{ name: '', email: '' }]);
     setPersonalName('');
     setPersonalRole('');
+    setMeetings([]);
+    setCurrentMeeting(null);
     showToast('Signed out successfully.', 'info');
   };
 
@@ -729,9 +733,11 @@ export default function App() {
         rawTranscript: transcriptText
       };
 
-      const updated = [newMeeting, ...meetings];
-      saveMeetingsToLocalStorage(updated);
-      setCurrentMeeting(newMeeting);
+      await apiFetch('/api/meetings', {
+        method: 'POST',
+        body: JSON.stringify(newMeeting)
+      });
+      await fetchMeetings();
       showToast('Transcript successfully analyzed and logged!', 'success');
       setActiveTab('analyze');
     } catch (err) {
@@ -764,41 +770,34 @@ export default function App() {
         rawTranscript: transcriptText
       };
 
-      const updated = [fallbackMeeting, ...meetings];
-      saveMeetingsToLocalStorage(updated);
-      setCurrentMeeting(fallbackMeeting);
-      showToast('Loaded sandbox fallback data.', 'info');
-      setActiveTab('analyze');
+      try {
+        await apiFetch('/api/meetings', {
+          method: 'POST',
+          body: JSON.stringify(fallbackMeeting)
+        });
+        await fetchMeetings();
+        showToast('Loaded sandbox fallback data.', 'info');
+        setActiveTab('analyze');
+      } catch (fallbackErr) {
+        showToast('Failed to save fallback data to database.', 'error');
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   // --- KANBAN BOARD LOGIC ---
-  const handleMoveTask = (taskId, newStatus) => {
-    const updatedMeetings = meetings.map(meet => {
-      const taskIndex = meet.tasks.findIndex(t => t.id === taskId);
-      if (taskIndex !== -1) {
-        const updatedTasks = [...meet.tasks];
-        updatedTasks[taskIndex] = { ...updatedTasks[taskIndex], status: newStatus };
-        return { ...meet, tasks: updatedTasks };
-      }
-      return meet;
-    });
-
-    saveMeetingsToLocalStorage(updatedMeetings);
-    
-    // Also update currentMeeting details if the moved task belonged to it
-    if (currentMeeting) {
-      const inCurrentIndex = currentMeeting.tasks.findIndex(t => t.id === taskId);
-      if (inCurrentIndex !== -1) {
-        const updatedCurTasks = [...currentMeeting.tasks];
-        updatedCurTasks[inCurrentIndex] = { ...updatedCurTasks[inCurrentIndex], status: newStatus };
-        setCurrentMeeting({ ...currentMeeting, tasks: updatedCurTasks });
-      }
+  const handleMoveTask = async (taskId, newStatus) => {
+    try {
+      await apiFetch(`/api/tasks/${taskId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus })
+      });
+      await fetchMeetings();
+      showToast(`Task updated to ${newStatus.replace('_', ' ')}`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to update task status', 'error');
     }
-    
-    showToast(`Task updated to ${newStatus.replace('_', ' ')}`, 'success');
   };
 
   // Drag and Drop integration
@@ -827,13 +826,19 @@ export default function App() {
   };
 
   // Clear local storage / resetting meetings
-  const handleResetData = () => {
-    if (window.confirm('Are you sure you want to reset all meetings to default sample datasets?')) {
-      window.localStorage.removeItem('meetmind_meetings');
-      setMeetings(DEFAULT_MEETINGS);
-      setCurrentMeeting(DEFAULT_MEETINGS[0]);
-      setAnalysisResult(DEFAULT_MEETINGS[0]);
-      showToast('Meetings restored to default sample data.', 'info');
+  const handleResetData = async () => {
+    if (window.confirm('Are you sure you want to reset all meetings? This will delete all meetings and clear your dashboard.')) {
+      try {
+        for (const meet of meetings) {
+          await apiFetch(`/api/meetings/${meet.id}`, { method: 'DELETE' });
+        }
+        setMeetings([]);
+        setCurrentMeeting(null);
+        setAnalysisResult(null);
+        showToast('All meetings successfully deleted from database.', 'info');
+      } catch (err) {
+        showToast('Failed to clear database meetings.', 'error');
+      }
     }
   };
 
@@ -954,7 +959,7 @@ export default function App() {
         ))}
       </div>
 
-      {!userSession ? (
+      {!userSession || !userSession.useCase || !userSession.details ? (
         <div className="onboarding-container">
           {onboardingStep === 1 && (
             <div className="onboarding-card">
