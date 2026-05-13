@@ -32,6 +32,14 @@ const initDatabase = async () => {
     console.log('🔄 Initializing PostgreSQL database tables...');
     await db.query(schemaSql);
     console.log('✅ PostgreSQL database tables initialized successfully.');
+
+    console.log('🧹 Cleaning up database seed templates for non-demo accounts...');
+    await db.query(`
+      DELETE FROM meetings 
+      WHERE (id LIKE 'sample-%' OR id LIKE 'meeting_fallback_%')
+        AND user_id NOT IN (SELECT id FROM users WHERE email LIKE '%demo%')
+    `);
+    console.log('✅ Database templates cleanup complete.');
   } catch (err) {
     console.error('❌ Failed to initialize database tables:', err.message);
   }

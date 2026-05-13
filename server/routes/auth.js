@@ -115,8 +115,36 @@ router.post('/register', async (req, res) => {
 
     const user = newUser.rows[0];
 
-
-
+    // Seed mock data ONLY if the registering user is a demo account
+    if (email.toLowerCase().includes('demo')) {
+      for (const m of DEFAULT_MEETINGS) {
+        const dbMeetingId = `${m.id}_${user.id}`;
+        await db.query(
+          'INSERT INTO meetings (id, user_id, title, date, summary, meeting_type, duration, sentiment, next_meeting, raw_transcript) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+          [dbMeetingId, user.id, m.title, m.date, m.summary, m.meetingType, m.duration, m.sentiment, m.nextMeeting, m.rawTranscript]
+        );
+        
+        for (const p of m.participants) {
+          await db.query('INSERT INTO meeting_participants (meeting_id, name, role) VALUES ($1, $2, $3)', [dbMeetingId, p.name, p.role]);
+        }
+        
+        for (const kp of m.keyPoints) {
+          await db.query('INSERT INTO meeting_key_points (meeting_id, point) VALUES ($1, $2)', [dbMeetingId, kp]);
+        }
+        
+        for (const dec of m.decisions) {
+          await db.query('INSERT INTO meeting_decisions (meeting_id, decision) VALUES ($1, $2)', [dbMeetingId, dec]);
+        }
+        
+        for (const t of m.tasks) {
+          const dbTaskId = `${t.id}_${user.id}`;
+          await db.query(
+            'INSERT INTO tasks (id, meeting_id, user_id, title, assignee, priority, due_date, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+            [dbTaskId, dbMeetingId, user.id, t.title, t.assignee, t.priority, t.dueDate, t.status]
+          );
+        }
+      }
+    }
     // Sign Token
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
