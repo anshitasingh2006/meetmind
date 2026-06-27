@@ -1392,13 +1392,6 @@ export default function App() {
                 </button>
               </div>
               <button 
-                onClick={() => setShowSettings(!showSettings)}
-                className="btn-secondary"
-                style={{ width: '100%', padding: '8px 12px', fontSize: '0.8rem', justifyContent: 'center' }}
-              >
-                Claude API Config
-              </button>
-              <button 
                 onClick={handleSignOut}
                 className="btn-secondary"
                 style={{ width: '100%', padding: '8px 12px', fontSize: '0.8rem', justifyContent: 'center', borderColor: 'rgba(196, 164, 104, 0.2)', color: 'var(--accent)' }}
