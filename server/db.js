@@ -6,7 +6,7 @@ const { Pool } = pg;
 const isProduction = process.env.NODE_ENV === 'production';
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/meetmind',
+  connectionString: process.env.DATABASE_URL || process.env.database_url || 'postgresql://localhost:5432/meetmind',
   ssl: isProduction ? { rejectUnauthorized: false } : false
 });
 
