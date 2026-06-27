@@ -16,6 +16,10 @@ const initDatabase = async () => {
   if (dbPromise) return dbPromise;
   dbPromise = (async () => {
     try {
+      if ((process.env.NODE_ENV === 'production' || process.env.VERCEL) && !process.env.DATABASE_URL) {
+        throw new Error('DATABASE_URL environment variable is missing. Please configure it in your Vercel Project Settings (Settings > Environment Variables) to connect to a hosted PostgreSQL database.');
+      }
+
       const schemaPath = path.join(__dirname, 'schema.sql');
       const schemaSql = fs.readFileSync(schemaPath, 'utf8');
       
