@@ -893,7 +893,7 @@ export default function App() {
 
   // AI Productivity insights dynamically computed based on backlog
   const generateAIInsights = () => {
-    if (totalTasksCount === 0) return "No task indicators loaded. Analyze transcripts to establish insights.";
+    if (totalTasksCount === 0) return ["No task indicators loaded. Analyze transcripts to establish insights."];
     
     let insights = [];
     
