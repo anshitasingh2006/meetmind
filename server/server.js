@@ -43,6 +43,17 @@ const initDatabase = async () => {
   return dbPromise;
 };
 
+// Health Check Route (Bypasses Database Initialization)
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    envKeys: Object.keys(process.env).filter(key => {
+      const k = key.toLowerCase();
+      return !k.includes('secret') && !k.includes('key') && !k.includes('pass') && !k.includes('token') && !k.includes('auth');
+    })
+  });
+});
+
 // Database Initialization Middleware
 app.use(async (req, res, next) => {
   try {
@@ -62,9 +73,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/tasks', taskRoutes);
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'healthy', database: 'connected' });
-});
 
 const startServer = async () => {
   try {
