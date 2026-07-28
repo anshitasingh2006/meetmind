@@ -216,18 +216,6 @@ Redeploy the application after updating the environment variables.
 
 ---
 
-# Screenshots
-
-Add screenshots of the following pages:
-
-* Home Page
-* Meeting Dashboard
-* Meeting Summary
-* Action Items
-* Login Page
-
----
-
 # Contributing
 
 Contributions are welcome.
